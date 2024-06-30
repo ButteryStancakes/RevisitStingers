@@ -3,7 +3,6 @@ using BepInEx.Logging;
 using BepInEx.Configuration;
 using HarmonyLib;
 using System.Collections;
-using System.Linq;
 using UnityEngine;                                           
 
 namespace RevisitStingers
@@ -11,7 +10,7 @@ namespace RevisitStingers
     [BepInPlugin(PLUGIN_GUID, PLUGIN_NAME, PLUGIN_VERSION)]
     public class Plugin : BaseUnityPlugin
     {
-        const string PLUGIN_GUID = "butterystancakes.lethalcompany.revisitstingers", PLUGIN_NAME = "Revisit Stingers", PLUGIN_VERSION = "1.0.2";
+        const string PLUGIN_GUID = "butterystancakes.lethalcompany.revisitstingers", PLUGIN_NAME = "Revisit Stingers", PLUGIN_VERSION = "1.1.0";
         internal static ConfigEntry<bool> configInterruptMusic;
         internal static new ManualLogSource Logger;
 
@@ -77,14 +76,33 @@ namespace RevisitStingers
     {
         internal static bool beenInsideThisRound;
 
+        const float INTERRUPT_CHANCE = 0.25f;
+        // 6.25% is basically just a magic number /shrug
+        // adamance has a 5.36% chance to interior swap, and stingers feel quite fitting there.
+        // next smallest chance is titan at 18.69%, which is definitely too frequent
+        const float MAX_RARITY = 0.0625f;
+
         internal static bool StingerShouldReplay()
         {
-            if (Plugin.configInterruptMusic.Value && SoundManager.Instance.musicSource.isPlaying && SoundManager.Instance.musicSource.time > 5f && Random.value <= 0.25f)
+            if (Plugin.configInterruptMusic.Value && SoundManager.Instance.musicSource.isPlaying && SoundManager.Instance.musicSource.time > 5f && Random.value <= INTERRUPT_CHANCE)
                 return true;
 
-            IntWithRarity interior = StartOfRound.Instance.currentLevel.dungeonFlowTypes.FirstOrDefault(intWithRarity => RoundManager.Instance.dungeonFlowTypes[intWithRarity.id].dungeonFlow == RoundManager.Instance.dungeonGenerator.Generator.DungeonFlow);
+            if (StartOfRound.Instance.currentLevel.dungeonFlowTypes?.Length < 2)
+                return false;
 
-            if (interior != null && interior.rarity < 20)
+            // get the rarity of the current level
+            int currentWeight = 0;
+            float totalWeights = 0f; 
+            foreach (IntWithRarity interior in StartOfRound.Instance.currentLevel.dungeonFlowTypes)
+            {
+                // weight of the current interior
+                if (RoundManager.Instance.dungeonFlowTypes[interior.id].dungeonFlow == RoundManager.Instance.dungeonGenerator.Generator.DungeonFlow)
+                    currentWeight = interior.rarity;
+                // add up all the weights to get percentage
+                totalWeights += interior.rarity;
+            }
+
+            if (currentWeight > 0 && (currentWeight / totalWeights) <= MAX_RARITY)
                 return true;
 
             return false;
