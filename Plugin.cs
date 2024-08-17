@@ -10,19 +10,34 @@ namespace RevisitStingers
     [BepInPlugin(PLUGIN_GUID, PLUGIN_NAME, PLUGIN_VERSION)]
     public class Plugin : BaseUnityPlugin
     {
-        const string PLUGIN_GUID = "butterystancakes.lethalcompany.revisitstingers", PLUGIN_NAME = "Revisit Stingers", PLUGIN_VERSION = "1.1.0";
-        internal static ConfigEntry<bool> configInterruptMusic;
+        const string PLUGIN_GUID = "butterystancakes.lethalcompany.revisitstingers", PLUGIN_NAME = "Revisit Stingers", PLUGIN_VERSION = "1.2.0";
+        internal static ConfigEntry<float> configMaxRarity, configInterruptMusic, configFallbackChance;
         internal static new ManualLogSource Logger;
 
         void Awake()
         {
             Logger = base.Logger;
 
+            AcceptableValueRange<float> percentage = new(0f, 1f);
+            string chanceHint = " (0 = never, 1 = guaranteed, or anything in between - 0.5 = 50% chance)";
+
+            configMaxRarity = Config.Bind(
+                "Misc",
+                "MaxRarity",
+                0.06f,
+                new ConfigDescription("The highest spawn chance (0.06 = 6%) an interior can have on a specific moon for it to be considered \"rare\". Rare interiors will always play the stinger.", percentage));
+
             configInterruptMusic = Config.Bind(
                 "Misc",
                 "InterruptMusic",
-                false,
-                "If an ambient music track is playing outdoors, the stinger has a (somewhat low) random chance to play as a musical transition upon entering the building.");
+                0f,
+                new ConfigDescription("The percentage chance for the stinger to play if you enter the building while an ambient music track is playing." + chanceHint, percentage));
+
+            configFallbackChance = Config.Bind(
+                "Misc",
+                "FallbackChance",
+                0f,
+                new ConfigDescription("The percentage chance that the stinger will still play, even if you are in a common interior and there is no music playing on the surface." + chanceHint, percentage));
 
             new Harmony(PLUGIN_GUID).PatchAll();
 
@@ -35,25 +50,27 @@ namespace RevisitStingers
     {
         [HarmonyPatch(typeof(EntranceTeleport), "TeleportPlayer")]
         [HarmonyPrefix]
-        static void EntranceTeleportPreTeleportPlayer(EntranceTeleport __instance, ref bool ___checkedForFirstTime)
+        static void EntranceTeleportPreTeleportPlayer(EntranceTeleport __instance, bool ___checkedForFirstTime)
         {
-            if (ReplayStinger.beenInsideThisRound)
+            if (ReplayStinger.beenInsideThisRound || !__instance.FindExitPoint())
                 return;
 
             ReplayStinger.beenInsideThisRound = true;
 
-            if (!___checkedForFirstTime && __instance.firstTimeAudio != null && ES3.Load($"PlayedDungeonEntrance{__instance.dungeonFlowId}", "LCGeneralSaveData", false) && (!StartOfRound.Instance.isChallengeFile || !ES3.Load("FinishedChallenge", "LCChallengeFile", false)))
+            // don't interfere with vanilla behavior
+            if (___checkedForFirstTime || !ES3.Load($"PlayedDungeonEntrance{RoundManager.Instance.currentDungeonType}", "LCGeneralSaveData", false))
+                return;
+
+            try
             {
-                try
-                {
-                    if (ReplayStinger.StingerShouldReplay())
-                        __instance.StartCoroutine(ReplayStinger.DelayedStinger(__instance.firstTimeAudio));
-                }
-                catch (System.Exception e)
-                {
-                    Plugin.Logger.LogError("Ran into an error attempting to replay stinger - this is likely due to an incompatibility with modded content");
-                    Plugin.Logger.LogError(e.Message);
-                }
+                AudioClip stinger = RoundManager.Instance.dungeonFlowTypes[RoundManager.Instance.currentDungeonType].firstTimeAudio;
+                if (ReplayStinger.StingerShouldReplay())
+                    __instance.StartCoroutine(ReplayStinger.DelayedStinger(stinger));
+            }
+            catch (System.Exception e)
+            {
+                Plugin.Logger.LogError("Ran into an error attempting to replay stinger - this is likely due to an incompatibility with modded content");
+                Plugin.Logger.LogError(e.Message);
             }
         }
 
@@ -76,36 +93,32 @@ namespace RevisitStingers
     {
         internal static bool beenInsideThisRound;
 
-        const float INTERRUPT_CHANCE = 0.25f;
-        // 6.25% is basically just a magic number /shrug
-        // adamance has a 5.36% chance to interior swap, and stingers feel quite fitting there.
-        // next smallest chance is titan at 18.69%, which is definitely too frequent
-        const float MAX_RARITY = 0.0625f;
-
         internal static bool StingerShouldReplay()
         {
-            if (Plugin.configInterruptMusic.Value && SoundManager.Instance.musicSource.isPlaying && SoundManager.Instance.musicSource.time > 5f && Random.value <= INTERRUPT_CHANCE)
+            if (Plugin.configInterruptMusic.Value > 0f && SoundManager.Instance.musicSource.isPlaying && Random.value <= Plugin.configInterruptMusic.Value)
                 return true;
 
-            if (StartOfRound.Instance.currentLevel.dungeonFlowTypes?.Length < 2)
-                return false;
-
-            // get the rarity of the current level
-            int currentWeight = 0;
-            float totalWeights = 0f; 
-            foreach (IntWithRarity interior in StartOfRound.Instance.currentLevel.dungeonFlowTypes)
+            // do rarity calculations, as long as current moon supports multiple interiors
+            // challenge moons are seeded, so skip if the player has attempted it before
+            if (StartOfRound.Instance.currentLevel.dungeonFlowTypes?.Length > 1 && (!StartOfRound.Instance.isChallengeFile || !ES3.Load("FinishedChallenge", "LCChallengeFile", false)))
             {
-                // weight of the current interior
-                if (RoundManager.Instance.dungeonFlowTypes[interior.id].dungeonFlow == RoundManager.Instance.dungeonGenerator.Generator.DungeonFlow)
-                    currentWeight = interior.rarity;
-                // add up all the weights to get percentage
-                totalWeights += interior.rarity;
+                // get the rarity of the current level
+                int currentWeight = 0;
+                float totalWeights = 0f;
+                foreach (IntWithRarity interior in StartOfRound.Instance.currentLevel.dungeonFlowTypes)
+                {
+                    // weight of the current interior
+                    if (interior.id == RoundManager.Instance.currentDungeonType)
+                        currentWeight = interior.rarity;
+                    // add up all the weights to get percentage
+                    totalWeights += interior.rarity;
+                }
+
+                if (currentWeight > 0 && (currentWeight / totalWeights) <= Plugin.configMaxRarity.Value)
+                    return true;
             }
 
-            if (currentWeight > 0 && (currentWeight / totalWeights) <= MAX_RARITY)
-                return true;
-
-            return false;
+            return Plugin.configFallbackChance.Value > 0f && Random.value <= Plugin.configFallbackChance.Value;
         }
 
         internal static IEnumerator DelayedStinger(AudioClip stinger)
