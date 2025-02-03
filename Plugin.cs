@@ -10,7 +10,7 @@ namespace RevisitStingers
     [BepInPlugin(PLUGIN_GUID, PLUGIN_NAME, PLUGIN_VERSION)]
     public class Plugin : BaseUnityPlugin
     {
-        const string PLUGIN_GUID = "butterystancakes.lethalcompany.revisitstingers", PLUGIN_NAME = "Revisit Stingers", PLUGIN_VERSION = "1.2.0";
+        const string PLUGIN_GUID = "butterystancakes.lethalcompany.revisitstingers", PLUGIN_NAME = "Revisit Stingers", PLUGIN_VERSION = "1.2.2";
         internal static ConfigEntry<float> configMaxRarity, configInterruptMusic, configFallbackChance;
         internal static new ManualLogSource Logger;
 
@@ -24,8 +24,8 @@ namespace RevisitStingers
             configMaxRarity = Config.Bind(
                 "Misc",
                 "MaxRarity",
-                0.06f,
-                new ConfigDescription("The highest spawn chance (0.06 = 6%) an interior can have on a specific moon for it to be considered \"rare\". Rare interiors will always play the stinger.", percentage));
+                0.16f,
+                new ConfigDescription("The highest spawn chance (0.16 = 16%) an interior can have on a specific moon for it to be considered \"rare\". Rare interiors will always play the stinger.", percentage));
 
             configInterruptMusic = Config.Bind(
                 "Misc",
@@ -69,8 +69,7 @@ namespace RevisitStingers
             }
             catch (System.Exception e)
             {
-                Plugin.Logger.LogError("Ran into an error attempting to replay stinger - this is likely due to an incompatibility with modded content");
-                Plugin.Logger.LogError(e.Message);
+                Plugin.Logger.LogWarning($"Ran into an error attempting to replay stinger - this is likely due to an incompatibility with modded content\n{e}");
             }
         }
 
