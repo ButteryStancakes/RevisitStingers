@@ -115,7 +115,8 @@ namespace RevisitStingers
                 if (stinger != null && (ReplayStinger.StingerShouldReplay() || !ES3.Load($"PlayedDungeonEntrance{RoundManager.Instance.currentDungeonType}", "LCGeneralSaveData", false)))
                 {
                     StartOfRound.Instance.StartCoroutine(ReplayStinger.DelayedStinger(stinger)); // in case inverse is stored
-                    ES3.Save($"PlayedDungeonEntrance{RoundManager.Instance.currentDungeonType}", true, "LCGeneralSaveData");
+                    if (ReplayStinger.IsVanillaDungeon())
+                        ES3.Save($"PlayedDungeonEntrance{RoundManager.Instance.currentDungeonType}", true, "LCGeneralSaveData");
                 }
             }
             catch (System.Exception e)
@@ -155,6 +156,11 @@ namespace RevisitStingers
             }
 
             return Plugin.configFallbackChance.Value > 0f && Random.value <= Plugin.configFallbackChance.Value;
+        }
+
+        internal static bool IsVanillaDungeon()
+        {
+            return RoundManager.Instance.currentDungeonType == 0 || RoundManager.Instance.currentDungeonType == 1 || RoundManager.Instance.currentDungeonType == 4;
         }
 
         internal static IEnumerator DelayedStinger(AudioClip stinger)
