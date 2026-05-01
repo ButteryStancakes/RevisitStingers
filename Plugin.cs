@@ -1,22 +1,26 @@
 ﻿using BepInEx;
 using BepInEx.Bootstrap;
-using BepInEx.Logging;
 using BepInEx.Configuration;
+using BepInEx.Logging;
 using HarmonyLib;
 using System.Collections;
-using UnityEngine;                                           
+using UnityEngine;
 
 namespace RevisitStingers
 {
     [BepInPlugin(PLUGIN_GUID, PLUGIN_NAME, PLUGIN_VERSION)]
     [BepInDependency(GUID_LOBBY_COMPATIBILITY, BepInDependency.DependencyFlags.SoftDependency)]
+    [BepInDependency(GUID_DAWN_LIB, BepInDependency.DependencyFlags.SoftDependency)]
     public class Plugin : BaseUnityPlugin
     {
-        internal const string PLUGIN_GUID = "butterystancakes.lethalcompany.revisitstingers", PLUGIN_NAME = "Revisit Stingers", PLUGIN_VERSION = "1.3.0";
+        internal const string PLUGIN_GUID = "butterystancakes.lethalcompany.revisitstingers", PLUGIN_NAME = "Revisit Stingers", PLUGIN_VERSION = "1.3.1";
         internal static ConfigEntry<float> configMaxRarity, configInterruptMusic, configFallbackChance;
         internal static new ManualLogSource Logger;
 
         const string GUID_LOBBY_COMPATIBILITY = "BMX.LobbyCompatibility";
+        const string GUID_DAWN_LIB = "com.github.teamxiaolan.dawnlib";
+
+        internal static bool TRUST_CHECKED_FOR_FIRST_TIME = true;
 
         void Awake()
         {
@@ -28,14 +32,20 @@ namespace RevisitStingers
                 LobbyCompatibility.Init();
             }
 
+            if (Chainloader.PluginInfos.ContainsKey(GUID_DAWN_LIB))
+            {
+                Logger.LogInfo("CROSS-COMPATIBILITY - DawnLib detected");
+                TRUST_CHECKED_FOR_FIRST_TIME = false;
+            }
+
             AcceptableValueRange<float> percentage = new(0f, 1f);
             string chanceHint = " (0 = never, 1 = guaranteed, or anything in between - 0.5 = 50% chance)";
 
             configMaxRarity = Config.Bind(
                 "Misc",
                 "MaxRarity",
-                0.16f,
-                new ConfigDescription("The highest spawn chance (0.16 = 16%) an interior can have on a specific moon for it to be considered \"rare\". Rare interiors will always play the stinger.", percentage));
+                0.25f,
+                new ConfigDescription("The highest spawn chance (0.25 = 25%) an interior can have on a specific moon for it to be considered \"rare\". Rare interiors will always play the stinger.", percentage));
 
             configInterruptMusic = Config.Bind(
                 "Misc",
@@ -58,9 +68,9 @@ namespace RevisitStingers
     [HarmonyPatch]
     class RevisitStingersPatches
     {
-        [HarmonyPatch(typeof(EntranceTeleport), "TeleportPlayer")]
+        [HarmonyPatch(typeof(EntranceTeleport), nameof(EntranceTeleport.TeleportPlayer))]
         [HarmonyPrefix]
-        static void EntranceTeleportPreTeleportPlayer(EntranceTeleport __instance, bool ___checkedForFirstTime)
+        static void EntranceTeleport_Pre_TeleportPlayer(EntranceTeleport __instance)
         {
             if (ReplayStinger.beenInsideThisRound || !__instance.FindExitPoint())
                 return;
@@ -71,7 +81,7 @@ namespace RevisitStingers
                 return;
 
             // don't interfere with vanilla behavior
-            if (___checkedForFirstTime || !ES3.Load($"PlayedDungeonEntrance{RoundManager.Instance.currentDungeonType}", "LCGeneralSaveData", false))
+            if ((__instance.checkedForFirstTime && Plugin.TRUST_CHECKED_FOR_FIRST_TIME) || !ES3.Load($"PlayedDungeonEntrance{RoundManager.Instance.currentDungeonType}", "LCGeneralSaveData", false))
                 return;
 
             try
@@ -86,23 +96,23 @@ namespace RevisitStingers
             }
         }
 
-        [HarmonyPatch(typeof(StartOfRound), "SetShipReadyToLand")]
+        [HarmonyPatch(typeof(StartOfRound), nameof(StartOfRound.SetShipReadyToLand))]
         [HarmonyPostfix]
-        static void StartOfRoundPostSetShipReadyToLand()
+        static void StartOfRound_Post_SetShipReadyToLand()
         {
             ReplayStinger.beenInsideThisRound = false;
         }
 
-        [HarmonyPatch(typeof(StartOfRound), "Awake")]
+        [HarmonyPatch(typeof(StartOfRound), nameof(StartOfRound.Awake))]
         [HarmonyPostfix]
-        static void StartOfRoundPostAwake()
+        static void StartOfRound_Post_Awake()
         {
             ReplayStinger.beenInsideThisRound = false;
         }
 
-        [HarmonyPatch(typeof(ShipTeleporter), "TeleportPlayerOutWithInverseTeleporter")]
+        [HarmonyPatch(typeof(ShipTeleporter), nameof(ShipTeleporter.TeleportPlayerOutWithInverseTeleporter))]
         [HarmonyPostfix]
-        static void PostTeleportPlayerOutWithInverseTeleporter(int playerObj)
+        static void ShipTeleporter_Post_TeleportPlayerOutWithInverseTeleporter(int playerObj)
         {
             if (StartOfRound.Instance.allPlayerScripts[playerObj] != GameNetworkManager.Instance.localPlayerController || ReplayStinger.beenInsideThisRound)
                 return;
